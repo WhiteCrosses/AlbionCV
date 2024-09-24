@@ -8,12 +8,16 @@ import pyautogui
 import mss
 from multiprocessing import Process
 import win32gui
+from PIL import Image
+import dxcam
 
+# returns a DXCamera instance on primary monitor
+camera = dxcam.create(output_color="BGR")
 
-northFile = "north.jpg"
-eastFile = "east.jpg"
-westFile = "west.jpg"
-playerIcon = "player_icon.jpg"
+northFile = "resources/north.jpg"
+eastFile = "resources/east.jpg"
+westFile = "resources/west.jpg"
+playerIcon = "resources/player_icon.jpg"
 
 
 @dataclass
@@ -36,13 +40,11 @@ class Bot:
 
         self.sct = mss.mss()
         self.monitor = self.sct.monitors[1]
-        print(self.monitor)
+
         self.lines_count = 0
         self.game_screenshot = None
-
+        self.game_screenshot_past = None
         self.threshold = 0.7
-        DEBUG = True
-        # self.wincap = WindowCapture("Albion Online Client")
 
         loop = self.loop()
 
@@ -55,137 +57,77 @@ class Bot:
     def run(self):
         self.loop()
 
+    def find_player_pos(self, img):
+        blues = self.game_screenshot[:, :, 0]
+        blues[blues < 200] = 0
+        blues[self.game_screenshot[:, :, 1] >= 200] = 0
+        self.game_screenshot[:, :, 0] = blues
+        self.game_screenshot[:, :, 1] = 0
+        self.game_screenshot[:, :, 2] = 0
+
+        player_pos = cv.matchTemplate(
+            self.game_screenshot[750:1080, 1500:1920], self.player_icon, cv.TM_CCORR)
+
+        cv.imshow(
+            "test2", player_pos)
+
+        # =================================================
+        if (player_pos.min() <= 0.5):
+            player_y_coords,    player_x_coords = np.where(
+                player_pos >= player_pos.max())
+
+        player_y_coords = player_y_coords + 750
+        player_x_coords = player_x_coords + 1500
+
+        player_w = self.player_icon.shape[1]
+        player_h = self.player_icon.shape[0]
+
+        if (len(player_x_coords)):
+            x_player, y_player = player_x_coords[0].astype(
+                'float64'), player_y_coords[0].astype('float64')
+            # x_player /= width_reset_multiplier
+            # y_player /= height_reset_multiplier
+            x_player_c = ((x_player + x_player + player_w) //
+                          2).astype('int')
+            y_player_c = ((y_player + y_player + player_h) //
+                          2).astype('int')
+
+        cv.circle(self.game_screenshot, (x_player_c,
+                                         y_player_c), 10, (255, 0, 0), 2)
+
+        # self.cvprint(('FPS {}'.format(1 / (time() - loop_time))))
+
+        return x_player_c, y_player_c
+
     def loop(self):
-
-        # self.wincap.start()
-        self.hwnd = win32gui.FindWindow(None, "Albion Online Client")
-
         loop_time = time()
         while (True):
             try:
-                img = self.sct.grab(self.monitor)
+                img = camera.grab()
+                if img is None:
+                    continue
 
-                game_screenshot = np.array(img)
-                game_screenshot = game_screenshot[..., :3]
-                self.game_screenshot = np.ascontiguousarray(game_screenshot)
+                self.game_screenshot = img
 
-                north_result = cv.matchTemplate(
-                    self.game_screenshot, self.north, cv.TM_CCOEFF_NORMED)
+                if (img is None):
+                    continue
 
-                west_result = cv.matchTemplate(
-                    self.game_screenshot, self.west, cv.TM_CCOEFF_NORMED)
+                if (self.game_screenshot_past is not None):
+                    cv.imshow(
+                        "test", self.game_screenshot_past[750:1080, 1500:1920])
 
-                north_pos = cv.matchTemplate(
-                    self.game_screenshot, self.north, cv.TM_CCOEFF_NORMED)
+                player_position = self.find_player_pos(img)
+                print(player_position)
 
-                west_pos = cv.matchTemplate(
-                    self.game_screenshot, self.west, cv.TM_CCOEFF_NORMED)
-
-                player_pos = cv.matchTemplate(
-                    self.game_screenshot[750:1080, 1500:1920], self.player_icon, cv.TM_CCOEFF_NORMED)
-
-                # =================================================
-
-                north_y_coords,     north_x_coords = np.where(
-                    north_result >= self.threshold)
-
-                west_y_coords,      west_x_coords = np.where(
-                    west_result >= self.threshold)
-
-                player_y_coords,    player_x_coords = np.where(
-                    player_pos >= player_pos.max())
-
-                tmp_img = player_pos
-                cv.imshow("tmp", tmp_img)
-
-                cv.waitKey(0)
-
-                player_y_coords = player_y_coords + 750
-                player_x_coords = player_x_coords + 1500
-
-                print(player_x_coords, player_y_coords)
-
-                width_reset_multiplier = self.game_screenshot.shape[1] / \
-                    self.monitor["width"]
-                height_reset_multiplier = self.game_screenshot.shape[0] / \
-                    self.monitor["height"]
-
-                w_north = self.north.shape[1]
-                h_north = self.north.shape[0]
-
-                w_west = self.west.shape[1]
-                h_west = self.west.shape[0]
-
-                player_w = self.player_icon.shape[1]
-                player_h = self.player_icon.shape[0]
-
-                if (len(north_x_coords)):
-                    x_north, y_north = north_x_coords[0].astype(
-                        'float64'),  north_y_coords[0].astype('float64')
-                    # x_north /= width_reset_multiplier
-                    # y_north /= height_reset_multiplier
-
-                    x_north_c = ((x_north + x_north + w_north) //
-                                 2).astype('int')
-                    y_north_c = ((y_north + y_north + h_north) //
-                                 2).astype('int')
-
-                if (len(west_x_coords)):
-                    x_west, y_west = west_x_coords[0].astype(
-                        'float64'),   west_y_coords[0].astype('float64')
-                    # x_west /= width_reset_multiplier
-                    # y_west /= height_reset_multiplier
-                    x_west_c = ((x_west + x_west + w_west) // 2).astype('int')
-                    y_west_c = ((y_west + y_west + h_west) // 2).astype('int')
-
-                if (len(player_x_coords)):
-                    x_player, y_player = player_x_coords[0].astype(
-                        'float64'), player_y_coords[0].astype('float64')
-                    # x_player /= width_reset_multiplier
-                    # y_player /= height_reset_multiplier
-                    x_player_c = ((x_player + x_player + player_w) //
-                                  2).astype('int')
-                    y_player_c = ((y_player + y_player + player_h) //
-                                  2).astype('int')
-
-                # Draw circles on points found
-                cv.circle(self.game_screenshot, (x_north_c,
-                                                 y_north_c), 10, (255, 0, 0), 2)
-                cv.circle(self.game_screenshot, (x_player_c,
-                                                 y_player_c), 10, (255, 0, 0), 2)
-
-                west_border = x_west_c
-                north_border = y_north_c
-
-                # draw rectangle from 3 points and calculate fourth
-
-                point_1 = (west_border, north_border)
-                point_2 = (west_border + 2*(west_border-x_north_c),
-                           north_border + 2*(north_border-y_north_c))
-
-                new_point_1 = (0, 0)
-                new_point_2 = (point_2[0] - point_1[0],
-                               point_2[1] - point_1[1])
-
-                player_relative_coords = (
-                    int(x_player - point_1[0]), int(y_player - point_1[1]))
-
-                cv.rectangle(self.game_screenshot, point_1,
-                             (point_1[0] + 360, point_1[1] + 250), (0, 255, 0), 2)
-
-                self.cvprint(('FPS {}'.format(1 / (time() - loop_time))))
-
-                loop_time = time()
-                cv.imshow('Game screenshot', self.game_screenshot)
                 key = cv.waitKey(1)
                 if key == ord('q'):
                     cv.destroyAllWindows()
                     break
-                self.game_screenshot = None
+                loop_time = time()
+                self.game_screenshot_past = self.game_screenshot
             except Exception as e:
                 print(e)
                 cv.destroyAllWindows()
                 break
 
             self.lines_count = 0
-            self.game_screenshot = np.zeros_like(self.game_screenshot)
