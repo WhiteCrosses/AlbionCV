@@ -12,6 +12,8 @@ import math
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
+import json
+
 
 # returns a DXCamera instance on primary monitor
 camera = dxcam.create(output_color="BGR")
@@ -45,6 +47,8 @@ class Bot(QThread):
         self.player_icon = cv.imread(playerIcon, cv.IMREAD_COLOR)
 
         self.target_list = np.empty((0, 2), dtype=int)
+        self.target_dict = {}
+        self.last_player_pos = None
         # open file with coordinates
         with open("test.txt", "r") as f:
             for line in f:
@@ -52,6 +56,10 @@ class Bot(QThread):
                 x, y = line.split(" ")
                 self.target_list = np.append(
                     self.target_list, [[int(x), int(y)]], axis=0)
+
+        with open("test_json.json", "r") as f:
+            self.target_dict = json.load(f)
+            print(self.target_dict)
 
         self.curr_point = 0
         self.movementStarted = False
@@ -64,7 +72,7 @@ class Bot(QThread):
         self.raw_img = None
         self.threshold = 0.7
 
-        self.target_pos = (200, 200)
+        self.target_pos = None
 
         self.ease_start = time()
 
@@ -98,6 +106,14 @@ class Bot(QThread):
         self.game_screenshot[:, :, 1] = 0
         self.game_screenshot[:, :, 2] = 0
 
+        if (self.last_player_pos is not None):
+
+            mask2 = np.full_like(img, 255)
+            mask2 = cv.circle(
+                mask2, (self.last_player_pos[0]-10, self.last_player_pos[1]-10), 20, (0, 0, 0), -1)
+            # self.game_screenshot[:, :, 0] = mask2[:, :, 0]
+            cv.subtract(self.game_screenshot, mask2, self.game_screenshot)
+            cv.imshow("mask2", self.game_screenshot[750:1080, 1500:1920])
         player_pos = cv.matchTemplate(
             self.game_screenshot[750:1080, 1500:1920], self.player_icon, cv.TM_CCORR)
 
@@ -120,6 +136,8 @@ class Bot(QThread):
             y_player_c = ((y_player + y_player + player_h) //
                           2).astype('int')
 
+        self.last_player_pos = (x_player_c, y_player_c)
+
         return x_player_c, y_player_c
 
     def loop(self):
@@ -127,7 +145,8 @@ class Bot(QThread):
         while (True):
             try:
                 img = camera.grab()
-                self.target_pos = self.target_list[self.curr_point]
+                if (len(self.target_list) != 0):
+                    self.target_pos = self.target_list[self.curr_point]
                 if img is None:
                     continue
 
@@ -139,14 +158,12 @@ class Bot(QThread):
 
                 player_position = self.find_player_pos(img)
 
-                if (player_position is not None):
+                if (player_position is not None and self.target_pos is not None):
                     if (abs(player_position[0] - 1500 - self.target_pos[0]) < 20) and (abs(player_position[1] - 750 - self.target_pos[1]) < 20):
                         self.curr_point = (
                             self.curr_point + 1) % len(self.target_list)
 
-                angle = 0
-
-                if (player_position is not None):
+                    angle = 0
                     angle = math.atan2(
                         (player_position[0] - self.target_pos[0] - 1500), (player_position[1] - self.target_pos[1] - 750))
 
@@ -159,18 +176,47 @@ class Bot(QThread):
                     print(abs(mouse_angle - angle) * 180 / math.pi)
 
                 if (not self.movementStarted):
-                    self.mouse_d_x = 1920 / 2 - 300 * \
-                        math.sin(angle) - pyautogui.position()[0]
-                    self.mouse_d_y = 1080 / 2 - 300 * \
-                        math.cos(angle) - pyautogui.position()[1]
-                    self.ease_start = time()
+
                     self.movementStarted = True
 
                 if (abs(mouse_angle - angle) * 180 / math.pi > 5):
-                    movement_duration = time() - self.ease_start
+                    def easeInOutQuart(t):
+                        t *= 2
+                        if t < 1:
+                            return t * t * t * t / 2
+                        else:
+                            t -= 2
+                            return -(t * t * t * t - 2) / 2
 
-                    # pyautogui.moveTo(
-                    #    pyautogui.position()[0] + self.easeInOutQuad(movement_duration / 10) * self.mouse_d_x, pyautogui.position()[1] + self.easeInOutQuad(movement_duration / 10) * self.mouse_d_y, 0.1)
+                    # position of mouse in angle direction with distance of 300 from center of screen
+                    mouse_target_pos_x = 1920 / 2 - 300 * math.sin(angle)
+                    mouse_target_pos_y = 1080 / 2 - 300 * math.cos(angle)
+
+                    print(f"x : {300 * math.sin(angle)}")
+                    print(f"y : {300 * math.cos(angle)}")
+
+                    start_pos_x = pyautogui.position()[0]
+                    start_pos_y = pyautogui.position()[1]
+
+                    x_d = mouse_target_pos_x - start_pos_x
+                    y_d = mouse_target_pos_y - start_pos_y
+
+                    points_x = np.linspace(0, 1, 20)
+                    points_y = np.linspace(0, 1, 20)
+
+                    tmp_points_x = []
+                    tmp_points_y = []
+                    for i in points_x:
+                        tmp_points_x.append(easeInOutQuart(
+                            i) * (1 - np.sinc(i * np.pi*2)) * x_d)
+                        tmp_points_y.append(easeInOutQuart(
+                            i) * (1 - np.sinc(i * np.pi*3)) * y_d)
+
+                    for i in range(len(tmp_points_x)):
+                        pyautogui.moveTo(start_pos_x + tmp_points_x[i],
+                                         start_pos_y + tmp_points_y[i], 0)
+
+                    # cv.waitKey(1000)
 
                 else:
                     self.movementStarted = False
