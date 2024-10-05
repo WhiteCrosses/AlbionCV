@@ -23,6 +23,10 @@ eastFile = "resources/east.jpg"
 westFile = "resources/west.jpg"
 playerIcon = "resources/player_icon.jpg"
 
+MOVEMENT_ENABLED = False
+MAX_DISTANCE = 20
+MAX_ANGLE_OFFSET = 5
+
 
 @dataclass
 class FontSettings:
@@ -145,24 +149,31 @@ class Bot(QThread):
         while (True):
             try:
                 img = camera.grab()
+
+                # check if there any targets in the list. If so, set next target to be tracked
                 if (len(self.target_list) != 0):
                     self.target_pos = self.target_list[self.curr_point]
+
+                # check if there is an image captured from screen
                 if img is None:
                     continue
 
+                # bad bad bad
+                # make copies of raw image for different outputs.
+                # Might change to make image as object with different versions
                 self.game_screenshot = np.copy(img)
                 self.raw_img = np.copy(img)
 
-                if (img is None):
-                    continue
-
+                # find player position
                 player_position = self.find_player_pos(img)
 
+                # check if plater is in target position with proximity of MAX_DISTANCE
                 if (player_position is not None and self.target_pos is not None):
-                    if (abs(player_position[0] - 1500 - self.target_pos[0]) < 20) and (abs(player_position[1] - 750 - self.target_pos[1]) < 20):
+                    if (abs(player_position[0] - 1500 - self.target_pos[0]) < MAX_DISTANCE) and (abs(player_position[1] - 750 - self.target_pos[1]) < MAX_DISTANCE):
                         self.curr_point = (
                             self.curr_point + 1) % len(self.target_list)
 
+                    # get and emit player position based on angle of player position from middle of map
                     angle = 0
                     angle = math.atan2(
                         (player_position[0] - self.target_pos[0] - 1500), (player_position[1] - self.target_pos[1] - 750))
@@ -176,10 +187,14 @@ class Bot(QThread):
                     print(abs(mouse_angle - angle) * 180 / math.pi)
 
                 if (not self.movementStarted):
-
                     self.movementStarted = True
 
-                if (abs(mouse_angle - angle) * 180 / math.pi > 5):
+                # check mouse offset of angle is based on mouse position from target angle to target
+                # if mouse offset is greater than MAX_ANGLE_OFFSET, then move mouse to target
+                # with ease in and out quartic
+                if (abs(mouse_angle - angle) * 180 / math.pi > MAX_ANGLE_OFFSET):
+                    # based on:
+                    # https://gist.github.com/robweychert/7efa6a5f762207245646b16f29dd6671
                     def easeInOutQuart(t):
                         t *= 2
                         if t < 1:
@@ -212,9 +227,10 @@ class Bot(QThread):
                         tmp_points_y.append(easeInOutQuart(
                             i) * (1 - np.sinc(i * np.pi*3)) * y_d)
 
-                    for i in range(len(tmp_points_x)):
-                        pyautogui.moveTo(start_pos_x + tmp_points_x[i],
-                                         start_pos_y + tmp_points_y[i], 0)
+                    if (MOVEMENT_ENABLED):
+                        for i in range(len(tmp_points_x)):
+                            pyautogui.moveTo(start_pos_x + tmp_points_x[i],
+                                             start_pos_y + tmp_points_y[i], 0)
 
                     # cv.waitKey(1000)
 
